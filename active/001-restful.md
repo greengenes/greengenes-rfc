@@ -56,7 +56,222 @@ Perhaps more useful going forward, it becomes possible to allow users to make cu
  
 # Detailed design
 
-Actual details on the API go here.
+The API description will be broken up into endpoints. One strategy with REST APIs is to only allow `GET` and `POST`, as is done with [Twitter](https://dev.twitter.com/rest/public). For the purposes of these descriptions, a `GET` is indempotent, and is used to retrieve information. A `POST` modifies server-side state. A minimal set of methods is pleasant, however there are likely instances where having a `PUT` is beneficial for describing an update operation. It is not clear if a `DELETE` will be useful in practice.
+
+For each endpoint, the following will be described:
+
+* a summary of the endpoint
+* whether authentication is necessary
+* a list of parameters and payload details
+* what can be expected on return
+
+We may want to expand out the description of each endpoint further before finalizing this RFC.
+
+
+The distinction used below between parameters and payload is that parameters are specified on the URL. For instance, `/record/1234?foo=bar` has a parameter `foo` that is valued with `bar`. Payload details are the body of the request or response. 
+
+All payload data will be encoded in JSON. All responses will be in JSON.
+
+If parameters, payload or response payload are undefined for the endpoint, then that subsection will be omitted below. 
+
+Any endpoint that requires authentication will implicitly return a `403` status code in the event of an unauthorized request.
+
+## Endpoint Summary
+
+| Endpoint | Description | Mapping |
+|----------|-------------| ------- |
+| `/raw_record` | Collection of raw unprocessed records |
+| `/record` |  Collection of processed records | 1-1 with `/raw_record` |
+| `/sequence` |  Collection of sequences, including aligned and subsequences | 1-1 with `/record`, 1-many with `/sequence` |
+| `/sequence/:id/metrics` | Sequence metrics (e.g., percent non-ATGC) | |  
+| `/taxonomy` | Collection of taxonomic information | 1-1 with `/record` per taxonomy type |
+| `/gene` | Gene mapping information by method (e.g., `/gene/16S?method=ssualign`) | 1-many with sequence as there may be many alignments for a gene |
+| `/phylogeny` | Collection of phylogenies | 1-1 with an MSA, 1-many with `/phylogeny` |
+| `/phylogeny/:id/metrics` | Metrics collected about a phylogeny | |
+| `/msa` | MSA mappings, including multigene MSAs | 1-many with genes |
+| `/msa/:id/metrics` | MSA metrics | | 
+| `/method` | Descriptions of methods that can operate on artifacts (e.g., FastTree, its version, and arguments used) | |
+| `/release` | Release details, such as the specific MSA sets, phylogeny, taxonomy, etc | Maps to lots of things |
+| `/otu` | An OTU set | many-many with `/sequence` |
+
+## API Detail
+
+### `POST /raw_record`
+
+Insert a new record into the database. It is expected that this record has a 1-1 mapping with INSDC. This is an unprocessed and raw record.
+
+**Authentication**: Yes
+
+#### Payload details
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `insdc`| `str` | yes | The INSDC accession of the record |
+| `data` | `str` | yes | A `UTF-8` encoded representation of the record |
+
+#### Response details
+
+| Status code | What it means |
+| ------------|--------|
+| `201` | The record was inserted without issue |
+| `400` | The contents of the payload could not be understood |
+| `409` | The INSDC accession is already represented |
+
+On a status code of `201`, the following payload is returned:
+
+| Key | Type | Description |
+| ----|------|-------------|
+| `raw_record_url` | `URL` | A fully qualified URL pointing to the added record |
+
+---
+
+### `GET /raw_record/:insdc`
+
+Retieve a raw record from the resource.
+
+**Authentication**: No
+
+#### Response details
+
+| Status code | What it means |
+| ------------|--------|
+| `200` | The record was found and returned |
+| `404` | The record does not exist |
+
+On a status code of `200`, the following payload is returned:
+
+| Key | Type | Description |
+| ----|------|-------------|
+| `raw_record_url` | `URL` | A fully qualified URL pointing to the retrieved record |
+| `insdc` | `str` | The accession corresponding to the record retrieved |
+| `ena_url` | `URL` | A likely URL into ENA for the record |
+| `creation_date` | `datetime` | The datetime that the record was inserved into the resource |
+| `data` | `str` | The raw record |
+
+---
+
+### `POST /record/:insdc`
+
+Insert processed details about a record, such as whether the record appears to be a clone or isolate. 
+
+**Authentication**: Yes
+
+#### Payload details
+
+| Key | Type | Required | Description | 
+|-----------|------|----------|-------------|
+| `record_type` | `{clone, isolate, named_isolate}` | Yes | What the source of the record appears to be |
+| `strain` | `str` | No | Strain details if available |
+| `publications` | `[str]` | No | A list of PMIDs |
+| `sequence` | `str` | Yes | The sequence for the record |
+| `organism` | `str` | Yes | The organism details as provided by the record |
+| `taxonomy` | `str` | Yes | The described taxonomy of the record |
+
+#### Response details
+
+| Status code | What it means |
+| ------------|--------|
+| `201` | The processed record was inserted without issue |
+| `400` | The contents of the payload could not be understood |
+| `409` | The INSDC accession is already represented as a processed record |
+
+On a status code of `201`, the following payload is returned:
+
+| Key | Type | Description |
+| ----|------|-------------|
+| `record_url` | `URL` | A URL pointing to the added record |
+| `sequence_url` | `URL` | A URL pointing to the sequence |
+| `taxonomy_url` | `URL` | A URL pointing to the taxonomy of the record |
+
+---
+
+### `GET /record/:insdc`
+
+Retrieve a record from the resource.
+
+**Authentication**: No
+
+#### Response details
+
+| Status code | What it means |
+| ------------|--------|
+| `200` | The record was found and returned |
+| `404` | The record does not exist |
+
+On a status code of `200`, the following payload is returned:
+
+| Key | Type | Description |
+| ----|------|-------------|
+| `record_url` | `URL` | A fully qualified URL pointing to the retrieved record |
+| `raw_record_url` | `URL` | A fully qualified URL pointing to raw record |
+| `insdc` | `str` | The accession corresponding to the record retrieved |
+| `ena_url` | `URL` | A likely URL into ENA for the record |
+| `creation_date` | `datetime` | The datetime that the record was inserved into the resource |
+| `organism` | `str` | The organism details as provided by the record |
+| `sequence_url` | `URL` | A URL pointing to the sequence |
+| `taxonomy_url` | `URL` | A URL pointing to the taxonomy of the record |
+| `record_type` | `{clone, isolate, named_isolate}` | What the source of the record appears to be |
+| `strain` | `str` | Strain details if available |
+| `publication_urls` | `[URL]` | A list of URLs to the publication details |
+
+---
+
+### `POST /sequence`
+
+Insert a sequence into the resource.
+
+**Authentication**: Yes
+
+#### Payload details
+
+| Key | Type | Required | Description | 
+|-----------|------|----------|-------------|
+| `insdc` | `str` | No | An INSDC accession if this is the sequence for the record |
+| `derived_from` | `int` | No | An existing `/sequence/:id` if it is a substring |
+| `start` | `int` | No | The start position in `derived_from` |
+| `end` | `int` | No | The end position in `derived_from` |
+| `sequence` | `str` | Yes | The actual sequence |
+
+#### Response details
+
+| Status code | What it means |
+| ------------|--------|
+| `201` | The sequence was inserted without issue |
+| `400` | The contents of the payload could not be understood |
+| `409` | The INSDC accession has a sequence associated |
+
+On a status code of `201`, the following payload is returned:
+
+| Key | Type | Description |
+| ----|------|-------------|
+| `sequence_url` | `URL` | A URL pointing to the added sequence |
+
+---
+
+### `GET /sequence/:id`
+
+Retrieve a sequence record.
+
+**Authentication**: No
+
+#### Response details
+
+| Status code | What it means |
+| ------------|--------|
+| `200` | The sequence was found and returned |
+| `404` | The record does not exist |
+
+On a status code of `200`, the following payload is returned:
+
+| Key | Type | Description |
+| ----|------|-------------|
+| `record_url` | `URL` | OPTIONAL: if the sequence is the primary sequence for a record |
+| `derived_from_url`| `URL` | OPTIONAL: if the sequence is a subsequence |
+| `start` | `int` | OPTIONAL: the start position if it is a subsequence |
+| `end` | `int` | OPTIONAL: the end position if it is a subsequence |
+| `sequence` | `str` | The actual sequence |
+
+---
 
 # Drawbacks
 
